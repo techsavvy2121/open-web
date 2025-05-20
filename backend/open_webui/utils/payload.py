@@ -1,49 +1,81 @@
 from open_webui.utils.task import prompt_template, prompt_variables_template
 from open_webui.utils.misc import add_or_update_system_message
 from typing import Callable, Optional
-from pathlib import Path
+import sqlite3
 import json
 
-
-BANNED_WORDS_PATH = "/app/backend/data/banned_words.json"
-TONE_PREFERENCES_PATH = "/app/backend/data/tone_preferences.json"
-
+DB_PATH = "/app/backend/data/webui.db"
 
 def get_banned_words(user_id):
-    if not Path(BANNED_WORDS_PATH).exists():
-        return []
     try:
-        with open(BANNED_WORDS_PATH, "r") as f:
-            data = json.load(f)
-            return data.get(user_id, {}).get("banned_words", [])
-    except Exception:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT data
+            FROM feedback
+            WHERE user_id = ?
+              AND type = 'rating'
+              AND json_extract(data, '$.rating') = -1
+              AND json_extract(data, '$.comment') LIKE '%dont use the word%'
+        """, (user_id,))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        banned = []
+        for row in rows:
+            comment = json.loads(row[0]).get("comment", "").lower()
+            if "dont use the word" in comment:
+                word = comment.split("dont use the word")[-1].strip(" .\n\"'")
+                banned.append(word)
+
+        return banned
+
+    except Exception as e:
+        print("Error fetching banned words from DB:", e)
         return []
 
 
 def get_tone_instructions(user_id):
-    if not Path(TONE_PREFERENCES_PATH).exists():
-        return []
     try:
-        with open(TONE_PREFERENCES_PATH, "r") as f:
-            data = json.load(f)
-            return data.get(user_id, {}).get("tone_instructions", [])
-    except Exception:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT data
+            FROM feedback
+            WHERE user_id = ?
+              AND type = 'rating'
+              AND json_extract(data, '$.rating') = -1
+              AND json_extract(data, '$.comment') LIKE '%tone%'
+        """, (user_id,))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        tones = []
+        for row in rows:
+            comment = json.loads(row[0]).get("comment", "")
+            tones.append(comment)
+
+        return tones
+
+    except Exception as e:
+        print("Error fetching tone instructions from DB:", e)
         return []
 
 
-# inplace function: form_data is modified
 def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: Optional[dict] = None, user=None) -> dict:
     system = params.get("system", None)
     if not system:
         return form_data
 
-    # Metadata (WebUI Usage)
     if metadata:
         variables = metadata.get("variables", {})
         if variables:
             system = prompt_variables_template(system, variables)
 
-    # Banned Words
     if user and hasattr(user, "id"):
         banned_words = get_banned_words(user.id)
         if banned_words:
@@ -55,7 +87,6 @@ def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: O
             tone_note = " ".join(tone_instructions)
             system = f"{system}\n\n{tone_note}"
 
-    # Legacy (API Usage)
     if user:
         template_params = {
             "user_name": user.name,
@@ -65,12 +96,10 @@ def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: O
         template_params = {}
 
     system = prompt_template(system, **template_params)
-
     form_data["messages"] = add_or_update_system_message(system, form_data.get("messages", []))
     return form_data
 
 
-# inplace function: form_data is modified
 def apply_model_params_to_body(params: dict, form_data: dict, mappings: dict[str, Callable]) -> dict:
     if not params:
         return form_data
@@ -82,7 +111,6 @@ def apply_model_params_to_body(params: dict, form_data: dict, mappings: dict[str
     return form_data
 
 
-# OPENAI PARAMS
 def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
     mappings = {
         "temperature": float,
@@ -99,7 +127,6 @@ def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
     return apply_model_params_to_body(params, form_data, mappings)
 
 
-# OLLAMA PARAMS
 def apply_model_params_to_body_ollama(params: dict, form_data: dict) -> dict:
     name_differences = {
         "max_tokens": "num_predict",
@@ -156,7 +183,6 @@ def convert_messages_openai_to_ollama(messages: list[dict]) -> list[dict]:
 
     for message in messages:
         new_message = {"role": message["role"]}
-
         content = message.get("content", [])
         tool_calls = message.get("tool_calls", None)
         tool_call_id = message.get("tool_call_id", None)
@@ -184,7 +210,6 @@ def convert_messages_openai_to_ollama(messages: list[dict]) -> list[dict]:
         else:
             content_text = ""
             images = []
-
             for item in content:
                 if item.get("type") == "text":
                     content_text += item.get("text", "")
@@ -193,7 +218,6 @@ def convert_messages_openai_to_ollama(messages: list[dict]) -> list[dict]:
                     if img_url.startswith("data:"):
                         img_url = img_url.split(",")[-1]
                     images.append(img_url)
-
             if content_text:
                 new_message["content"] = content_text.strip()
             if images:
