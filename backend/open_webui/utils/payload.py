@@ -3,9 +3,9 @@ from open_webui.utils.misc import add_or_update_system_message
 from typing import Callable, Optional
 import sqlite3
 import json
-#import pprint
 
 DB_PATH = "/app/backend/data/webui.db"
+
 
 def get_banned_words(user_id):
     try:
@@ -68,7 +68,6 @@ def get_tone_instructions(user_id):
 
 
 def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: Optional[dict] = None, user=None) -> dict:
-    print("DEBUG SYSTEM PARAM:", params.get("system"))
     system = params.get("system", None)
     if not system:
         return form_data
@@ -98,17 +97,6 @@ def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: O
         template_params = {}
 
     system = prompt_template(system, **template_params)
-    
-    pp = pprint.PrettyPrinter(indent=2)
-
-    #print("\n==== DEBUG: Final Prompt Injection ====")
-    #pp.pprint({
-    #"Final System Prompt": system,
-   # "User ID": user.id if user and hasattr(user, "id") else None,
-   # "Params": params,
-   # "Tone Instructions": get_tone_instructions(user.id) if user and hasattr(user, "id") else [],
-    #"Banned Words": get_banned_words(user.id) if user and hasattr(user, "id") else [],
-#})
 
     form_data["messages"] = add_or_update_system_message(system, form_data.get("messages", []))
     return form_data
