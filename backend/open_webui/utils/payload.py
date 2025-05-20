@@ -99,16 +99,16 @@ def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: O
 
     system = prompt_template(system, **template_params)
     
-    """pp = pprint.PrettyPrinter(indent=2)
+    pp = pprint.PrettyPrinter(indent=2)
 
-    print("\n==== DEBUG: Final Prompt Injection ====")
-    pp.pprint({
-    "Final System Prompt": system,
-    "User ID": user.id if user and hasattr(user, "id") else None,
-    "Params": params,
-    "Tone Instructions": get_tone_instructions(user.id) if user and hasattr(user, "id") else [],
-    "Banned Words": get_banned_words(user.id) if user and hasattr(user, "id") else [],"""
-})
+    #print("\n==== DEBUG: Final Prompt Injection ====")
+    #pp.pprint({
+    #"Final System Prompt": system,
+   # "User ID": user.id if user and hasattr(user, "id") else None,
+   # "Params": params,
+   # "Tone Instructions": get_tone_instructions(user.id) if user and hasattr(user, "id") else [],
+    #"Banned Words": get_banned_words(user.id) if user and hasattr(user, "id") else [],
+#})
 
     form_data["messages"] = add_or_update_system_message(system, form_data.get("messages", []))
     return form_data
