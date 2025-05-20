@@ -3,6 +3,9 @@ from open_webui.utils.misc import add_or_update_system_message
 from typing import Callable, Optional
 import sqlite3
 import json
+import os
+DEFAULT_SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
+
 
 DB_PATH = "/app/backend/data/webui.db"
 
@@ -68,7 +71,9 @@ def get_tone_instructions(user_id):
 
 
 def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: Optional[dict] = None, user=None) -> dict:
-    system = params.get("system", None)
+    #system = params.get("system", None)
+    system = params.get("system") or DEFAULT_SYSTEM_PROMPT
+
     if not system:
         return form_data
 
