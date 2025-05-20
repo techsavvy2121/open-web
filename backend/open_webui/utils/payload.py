@@ -68,6 +68,7 @@ def get_tone_instructions(user_id):
 
 
 def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: Optional[dict] = None, user=None) -> dict:
+    print("DEBUG SYSTEM PARAM:", params.get("system"))
     system = params.get("system", None)
     if not system:
         return form_data
