@@ -5,13 +5,14 @@ from open_webui.utils.misc import (
 
 from typing import Callable, Optional
 import json
+import os  # Make sure 'os' is imported at the top if not already
 
 
 # inplace function: form_data is modified
 def apply_model_system_prompt_to_body(
     params: dict, form_data: dict, metadata: Optional[dict] = None, user=None
 ) -> dict:
-import os  # Make sure 'os' is imported at the top if not already
+
 print("DEBUG SYSTEM:", params.get("system"))  # print if system param is present
 print("DEBUG ENV SYSTEM_PROMPT:", os.getenv("SYSTEM_PROMPT"))
 
