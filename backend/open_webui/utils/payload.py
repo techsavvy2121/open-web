@@ -70,8 +70,15 @@ def get_tone_instructions(user_id):
         return []
 
 
+from os import getenv
+
+DEFAULT_SYSTEM_PROMPT = getenv("SYSTEM_PROMPT", "")
+
+from os import getenv
+
+DEFAULT_SYSTEM_PROMPT = getenv("SYSTEM_PROMPT", "")
+
 def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: Optional[dict] = None, user=None) -> dict:
-    #system = params.get("system", None)
     system = params.get("system") or DEFAULT_SYSTEM_PROMPT
 
     if not system:
@@ -93,29 +100,16 @@ def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: O
             tone_note = " ".join(tone_instructions)
             system = f"{system}\n\n{tone_note}"
 
-    if user:
-        template_params = {
-            "user_name": user.name,
-            "user_location": user.info.get("location") if user.info else None,
-        }
-    else:
-        template_params = {}
+    template_params = {
+        "user_name": user.name if user else None,
+        "user_location": user.info.get("location") if user and user.info else None,
+    }
 
     system = prompt_template(system, **template_params)
 
     form_data["messages"] = add_or_update_system_message(system, form_data.get("messages", []))
     return form_data
 
-
-def apply_model_params_to_body(params: dict, form_data: dict, mappings: dict[str, Callable]) -> dict:
-    if not params:
-        return form_data
-
-    for key, cast_func in mappings.items():
-        if (value := params.get(key)) is not None:
-            form_data[key] = cast_func(value)
-
-    return form_data
 
 
 def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
