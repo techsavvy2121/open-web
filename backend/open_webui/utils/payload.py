@@ -1,117 +1,58 @@
 from open_webui.utils.task import prompt_template, prompt_variables_template
-from open_webui.utils.misc import add_or_update_system_message
+from open_webui.utils.misc import (
+    add_or_update_system_message,
+)
+
 from typing import Callable, Optional
-import sqlite3
 import json
-import os
-DEFAULT_SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
 
 
-DB_PATH = "/app/backend/data/webui.db"
-
-
-def get_banned_words(user_id):
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT data
-            FROM feedback
-            WHERE user_id = ?
-              AND type = 'rating'
-              AND json_extract(data, '$.rating') = -1
-              AND json_extract(data, '$.comment') LIKE '%dont use the word%'
-        """, (user_id,))
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        banned = []
-        for row in rows:
-            comment = json.loads(row[0]).get("comment", "").lower()
-            if "dont use the word" in comment:
-                word = comment.split("dont use the word")[-1].strip(" .\n\"'")
-                banned.append(word)
-
-        return banned
-
-    except Exception as e:
-        print("Error fetching banned words from DB:", e)
-        return []
-
-
-def get_tone_instructions(user_id):
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT data
-            FROM feedback
-            WHERE user_id = ?
-              AND type = 'rating'
-              AND json_extract(data, '$.rating') = -1
-              AND json_extract(data, '$.comment') LIKE '%tone%'
-        """, (user_id,))
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        tones = []
-        for row in rows:
-            comment = json.loads(row[0]).get("comment", "")
-            tones.append(comment)
-
-        return tones
-
-    except Exception as e:
-        print("Error fetching tone instructions from DB:", e)
-        return []
-
-
-from os import getenv
-
-DEFAULT_SYSTEM_PROMPT = getenv("SYSTEM_PROMPT", "")
-
-from os import getenv
-
-DEFAULT_SYSTEM_PROMPT = getenv("SYSTEM_PROMPT", "")
-
-def apply_model_system_prompt_to_body(params: dict, form_data: dict, metadata: Optional[dict] = None, user=None) -> dict:
-    system = params.get("system") or DEFAULT_SYSTEM_PROMPT
-
+# inplace function: form_data is modified
+def apply_model_system_prompt_to_body(
+    params: dict, form_data: dict, metadata: Optional[dict] = None, user=None
+) -> dict:
+    system = params.get("system", None)
     if not system:
         return form_data
 
+    # Metadata (WebUI Usage)
     if metadata:
         variables = metadata.get("variables", {})
         if variables:
             system = prompt_variables_template(system, variables)
 
-    if user and hasattr(user, "id"):
-        banned_words = get_banned_words(user.id)
-        if banned_words:
-            banned_line = f"Please do not use the following words in your response: {', '.join(banned_words)}."
-            system = f"{system}\n\n{banned_line}"
-
-        tone_instructions = get_tone_instructions(user.id)
-        if tone_instructions:
-            tone_note = " ".join(tone_instructions)
-            system = f"{system}\n\n{tone_note}"
-
-    template_params = {
-        "user_name": user.name if user else None,
-        "user_location": user.info.get("location") if user and user.info else None,
-    }
+    # Legacy (API Usage)
+    if user:
+        template_params = {
+            "user_name": user.name,
+            "user_location": user.info.get("location") if user.info else None,
+        }
+    else:
+        template_params = {}
 
     system = prompt_template(system, **template_params)
 
-    form_data["messages"] = add_or_update_system_message(system, form_data.get("messages", []))
+    form_data["messages"] = add_or_update_system_message(
+        system, form_data.get("messages", [])
+    )
     return form_data
 
 
+# inplace function: form_data is modified
+def apply_model_params_to_body(
+    params: dict, form_data: dict, mappings: dict[str, Callable]
+) -> dict:
+    if not params:
+        return form_data
 
+    for key, cast_func in mappings.items():
+        if (value := params.get(key)) is not None:
+            form_data[key] = cast_func(value)
+
+    return form_data
+
+
+# inplace function: form_data is modified
 def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
     mappings = {
         "temperature": float,
@@ -129,15 +70,18 @@ def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
 
 
 def apply_model_params_to_body_ollama(params: dict, form_data: dict) -> dict:
+    # Convert OpenAI parameter names to Ollama parameter names if needed.
     name_differences = {
         "max_tokens": "num_predict",
     }
 
     for key, value in name_differences.items():
         if (param := params.get(key, None)) is not None:
+            # Copy the parameter to new name then delete it, to prevent Ollama warning of invalid option provided
             params[value] = params[key]
             del params[key]
 
+    # See https://github.com/ollama/ollama/blob/main/docs/api.md#request-8
     mappings = {
         "temperature": float,
         "top_p": float,
@@ -168,6 +112,7 @@ def apply_model_params_to_body_ollama(params: dict, form_data: dict) -> dict:
         "num_thread": int,
     }
 
+    # Extract keep_alive from options if it exists
     if "options" in form_data and "keep_alive" in form_data["options"]:
         form_data["keep_alive"] = form_data["options"]["keep_alive"]
         del form_data["options"]["keep_alive"]
@@ -183,17 +128,24 @@ def convert_messages_openai_to_ollama(messages: list[dict]) -> list[dict]:
     ollama_messages = []
 
     for message in messages:
+        # Initialize the new message structure with the role
         new_message = {"role": message["role"]}
+
         content = message.get("content", [])
         tool_calls = message.get("tool_calls", None)
         tool_call_id = message.get("tool_call_id", None)
 
+        # Check if the content is a string (just a simple message)
         if isinstance(content, str) and not tool_calls:
+            # If the content is a string, it's pure text
             new_message["content"] = content
+
+            # If message is a tool call, add the tool call id to the message
             if tool_call_id:
                 new_message["tool_call_id"] = tool_call_id
 
         elif tool_calls:
+            # If tool calls are present, add them to the message
             ollama_tool_calls = []
             for tool_call in tool_calls:
                 ollama_tool_call = {
@@ -201,40 +153,69 @@ def convert_messages_openai_to_ollama(messages: list[dict]) -> list[dict]:
                     "id": tool_call.get("id", None),
                     "function": {
                         "name": tool_call.get("function", {}).get("name", ""),
-                        "arguments": json.loads(tool_call.get("function", {}).get("arguments", "{}")),
+                        "arguments": json.loads(
+                            tool_call.get("function", {}).get("arguments", {})
+                        ),
                     },
                 }
                 ollama_tool_calls.append(ollama_tool_call)
             new_message["tool_calls"] = ollama_tool_calls
+
+            # Put the content to empty string (Ollama requires an empty string for tool calls)
             new_message["content"] = ""
 
         else:
+            # Otherwise, assume the content is a list of dicts, e.g., text followed by an image URL
             content_text = ""
             images = []
+
+            # Iterate through the list of content items
             for item in content:
+                # Check if it's a text type
                 if item.get("type") == "text":
                     content_text += item.get("text", "")
+
+                # Check if it's an image URL type
                 elif item.get("type") == "image_url":
                     img_url = item.get("image_url", {}).get("url", "")
-                    if img_url.startswith("data:"):
-                        img_url = img_url.split(",")[-1]
-                    images.append(img_url)
+                    if img_url:
+                        # If the image url starts with data:, it's a base64 image and should be trimmed
+                        if img_url.startswith("data:"):
+                            img_url = img_url.split(",")[-1]
+                        images.append(img_url)
+
+            # Add content text (if any)
             if content_text:
                 new_message["content"] = content_text.strip()
+
+            # Add images (if any)
             if images:
                 new_message["images"] = images
 
+        # Append the new formatted message to the result
         ollama_messages.append(new_message)
 
     return ollama_messages
 
 
 def convert_payload_openai_to_ollama(openai_payload: dict) -> dict:
-    ollama_payload = {
-        "model": openai_payload.get("model"),
-        "messages": convert_messages_openai_to_ollama(openai_payload.get("messages")),
-        "stream": openai_payload.get("stream", False),
-    }
+    """
+    Converts a payload formatted for OpenAI's API to be compatible with Ollama's API endpoint for chat completions.
+
+    Args:
+        openai_payload (dict): The payload originally designed for OpenAI API usage.
+
+    Returns:
+        dict: A modified payload compatible with the Ollama API.
+    """
+    ollama_payload = {}
+
+    # Mapping basic model and message details
+    ollama_payload["model"] = openai_payload.get("model")
+    ollama_payload["messages"] = convert_messages_openai_to_ollama(
+        openai_payload.get("messages")
+    )
+    ollama_payload["stream"] = openai_payload.get("stream", False)
 
     if "tools" in openai_payload:
         ollama_payload["tools"] = openai_payload["tools"]
@@ -242,30 +223,46 @@ def convert_payload_openai_to_ollama(openai_payload: dict) -> dict:
     if "format" in openai_payload:
         ollama_payload["format"] = openai_payload["format"]
 
+    # If there are advanced parameters in the payload, format them in Ollama's options field
     if openai_payload.get("options"):
         ollama_payload["options"] = openai_payload["options"]
-        ollama_options = ollama_payload["options"]
+        ollama_options = openai_payload["options"]
 
+        # Re-Mapping OpenAI's `max_tokens` -> Ollama's `num_predict`
         if "max_tokens" in ollama_options:
-            ollama_options["num_predict"] = ollama_options.pop("max_tokens")
+            ollama_options["num_predict"] = ollama_options["max_tokens"]
+            del ollama_options[
+                "max_tokens"
+            ]  # To prevent Ollama warning of invalid option provided
 
+        # Ollama lacks a "system" prompt option. It has to be provided as a direct parameter, so we copy it down.
         if "system" in ollama_options:
-            ollama_payload["system"] = ollama_options.pop("system")
+            ollama_payload["system"] = ollama_options["system"]
+            del ollama_options[
+                "system"
+            ]  # To prevent Ollama warning of invalid option provided
 
+        # Extract keep_alive from options if it exists
         if "keep_alive" in ollama_options:
-            ollama_payload["keep_alive"] = ollama_options.pop("keep_alive")
+            ollama_payload["keep_alive"] = ollama_options["keep_alive"]
+            del ollama_options["keep_alive"]
 
+    # If there is the "stop" parameter in the openai_payload, remap it to the ollama_payload.options
     if "stop" in openai_payload:
-        ollama_payload.setdefault("options", {})["stop"] = openai_payload["stop"]
+        ollama_options = ollama_payload.get("options", {})
+        ollama_options["stop"] = openai_payload.get("stop")
+        ollama_payload["options"] = ollama_options
 
     if "metadata" in openai_payload:
         ollama_payload["metadata"] = openai_payload["metadata"]
 
     if "response_format" in openai_payload:
         response_format = openai_payload["response_format"]
-        format_type = response_format.get("type")
-        schema = response_format.get(format_type)
+        format_type = response_format.get("type", None)
+
+        schema = response_format.get(format_type, None)
         if schema:
-            ollama_payload["format"] = schema.get("schema")
+            format = schema.get("schema", None)
+            ollama_payload["format"] = format
 
     return ollama_payload
