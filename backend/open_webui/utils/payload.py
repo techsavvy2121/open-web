@@ -12,7 +12,7 @@ import os  # Make sure 'os' is imported at the top if not already
 def apply_model_system_prompt_to_body(
     params: dict, form_data: dict, metadata: Optional[dict] = None, user=None
 ) -> dict:
-print("✅ payload.py: apply_model_system_prompt_to_body was triggered")
+    print("✅ payload.py: apply_model_system_prompt_to_body was triggered")
     print("DEBUG SYSTEM:", params.get("system"))  # print if system param is present
     print("DEBUG ENV SYSTEM_PROMPT:", os.getenv("SYSTEM_PROMPT"))
 
