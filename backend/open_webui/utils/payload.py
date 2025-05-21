@@ -11,6 +11,9 @@ import json
 def apply_model_system_prompt_to_body(
     params: dict, form_data: dict, metadata: Optional[dict] = None, user=None
 ) -> dict:
+print("DEBUG SYSTEM:", params.get("system"))  # print if system param is present
+print("DEBUG ENV SYSTEM_PROMPT:", os.getenv("SYSTEM_PROMPT"))
+
     system = params.get("system", None)
     if not system:
         return form_data
